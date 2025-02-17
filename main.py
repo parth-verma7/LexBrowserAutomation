@@ -26,7 +26,7 @@ class WebsiteNavigator:
         async with async_playwright() as p:
             browser = None
             try:
-                browser = await p.chromium.launch(headless=False, slow_mo=1000)
+                browser = await p.chromium.launch(headless=False, slow_mo=50)
                 page = await browser.new_page()
 
                 self.url = self._extract_url_from_prompt(prompt)
@@ -125,63 +125,42 @@ class WebsiteNavigator:
         recommended_action = await self._extract_json_from_gemini_response(recommended_action)
 
         try:
-            logger.info("Gemini response successfully parsed as JSON")
+            logger.info("Gemini response successfully parsed as json")
         except Exception as e:
-            logger.error(f"Error processing Gemini response: {str(e)}")
+            logger.error(f"Error processing gemini response: {str(e)}")
             return False
         
         try:
+        # Corrected access to element_text
             element_text = recommended_action['recommended_action']['element_text']
             logger.info(f"Attempting to click: {element_text}")
 
-            href = recommended_action['recommended_action']['element_attributes'].get('href', None)
+            # Extract href safely
+            href = recommended_action['recommended_action']['element_attributes'].get('href')
             next_steps = recommended_action["next_steps"][0]
-            logger.info(f"href: {href} \n next_steps: {next_steps}")
+            print(logging.info(f"Next steps: {next_steps}"))
+            if not href:
+                logger.error("No href found in element attributes")
+                return False
+            
+            logger.info(f"The requested attribute: {href}")
 
-            # If `href="#"`, we assume it's a dropdown, so hover first
-            if href == "#":
-                logger.info(f"Element '{element_text}' has no valid href. Attempting to hover first.")
-
-                try:
-                    # Locate the closest parent element that has a dropdown class
-                    parent_element = page.locator(f"li:has(a:has-text('{element_text.strip()}'))")
-                    if await parent_element.count() > 0:
-                        await parent_element.hover()
-                        await page.wait_for_timeout(1000)
-                        logger.info(f"Hovered over '{element_text}' successfully.")
-
-                        # Extract submenu elements
-                        new_elements = await self._extract_clickable_elements(page)
-                        if new_elements:
-                            processed_tags = await self._process_elements(new_elements)
-
-                            # 🟢 Send new elements to LLM for final selection
-                            logger.info("Passing new dropdown elements to LLM...")
-                            llm_prompt = self._create_gemini_prompt(f"Which element should I click after hovering over '{element_text}'?", processed_tags)
-                            response = self.gemini_object.gemini_response(llm_prompt)
-
-                            return await self._click_recommended_elements(page, response)
-
-                except Exception as e:
-                    logger.warning(f"Failed to hover over '{element_text}': {str(e)}")
-                    return False
-
-            # Try clicking the element
+            # Define selector
             selectors = [
                 f"a[href='{href}']",
                 f"a:has-text('{element_text.strip()}')"  # Alternative selector using text
             ]
 
+            # Try clicking using each selector
             for selector in selectors:
                 try:
                     await page.click(selector, timeout=5000)
                     logger.info(f"Successfully clicked element using selector: {selector}")
-                    await page.wait_for_timeout(5000)
-
+                    await page.wait_for_timeout(10000)  # Ensure the page loads
+                    
                     if next_steps == "exit_now":
                         return False
-                    else:
-                        return True
+                    else: return True
 
                 except Exception as e:
                     logger.warning(f"Failed to click with selector {selector}: {str(e)}")
@@ -193,7 +172,6 @@ class WebsiteNavigator:
         except Exception as e:
             logger.error(f"Error clicking recommended element: {str(e)}")
             return False
-
 
     def _create_gemini_prompt(self, user_prompt: str, tags: List[Dict]) -> str:
         """Creates a structured response from Gemini."""
@@ -228,7 +206,7 @@ class WebsiteNavigator:
 async def main():
     try:
         navigator = WebsiteNavigator()
-        prompt = "From the General Information Section, download the official PDF list of holidays for Lucknow in the year 2025 from https://itat.gov.in/"
+        prompt = "Go to https://file-examples.com/ and download the smallest doc file."
         result = await navigator.visit_website(prompt)
         if result:
             print("\n🤖 Navigation Instructions:")
